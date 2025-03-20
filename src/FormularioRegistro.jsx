@@ -1,37 +1,43 @@
 import React, { useState } from "react";
 import { db } from "./firebase";
-import { collection, addDoc } from "firebase/firestore";
-import { useNavigate } from "react-router-dom"; // Para redirigir después del registro
+import { collection, addDoc, getDocs, query, where } from "firebase/firestore";
+import { useNavigate } from "react-router-dom";
 
 export default function FormularioRegistro() {
   const [numCuenta, setNumCuenta] = useState("");
   const [nombre, setNombre] = useState("");
   const [semestre, setSemestre] = useState("");
   const [grupo, setGrupo] = useState("");
-  const navigate = useNavigate(); // Redirigir después del registro
+  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (numCuenta.length === 6 && nombre && semestre && grupo) {
       try {
-        // Agregar los datos del alumno a la colección 'alumnos' en Firestore
-        await addDoc(collection(db, "alumnos"), {
+        const alumnosRef = collection(db, "alumnos");
+        const q = query(alumnosRef, where("numCuenta", "==", numCuenta));
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+          alert("El número de cuenta ya está registrado.");
+          return;
+        }
+
+        await addDoc(alumnosRef, {
           numCuenta,
-          Nombre: nombre,
+          nombre: nombre,
           Semestre: semestre,
           Grupo: grupo,
         });
 
-        // Limpiar los campos después de guardar
+        alert("Alumno registrado exitosamente");
+
         setNumCuenta("");
         setNombre("");
         setSemestre("");
         setGrupo("");
 
-        alert("Alumno registrado exitosamente");
-
-        // Redirigir a la página principal o a donde quieras
         navigate("/");
       } catch (error) {
         console.error("Error al registrar alumno:", error);
