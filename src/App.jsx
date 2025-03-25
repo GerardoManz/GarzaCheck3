@@ -11,7 +11,7 @@ import './styles.css';
 const LogoUAEH = ({ height = 80 }) => {
   return (
     <img
-      src="/public/UAEH_Logo.png"
+      src="/UAEH_Logo.png"
       alt="Logo UAEH"
       className="w-20 object-contain"
       style={{ height: `${height}px` }}
@@ -21,7 +21,7 @@ const LogoUAEH = ({ height = 80 }) => {
 const LogoPrepa6 = ({ height = 80 }) => {
   return (
     <img
-      src="/public/Prepa6.png"
+      src="/Prepa6.png"
       alt="Logo Prepa6"
       className="w-20 object-contain"
       style={{ height: `${height}px` }}
