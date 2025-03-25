@@ -97,10 +97,8 @@ export default function FormularioRegistro() {
           Subir Alumnos
         </button>
         <button
-
           onClick={() => navigate("/")}
-          className="mt-4 w-full bg-gray-500 text-white p-2 rounded-lg hover:bg-gray-600"
-        >
+          className="mt-4 w-full bg-gray-500 text-white p-2 rounded-lg hover:bg-gray-600">
           Regresar
         </button>
       </div>
