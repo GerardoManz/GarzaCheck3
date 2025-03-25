@@ -8,6 +8,27 @@ import CargarAlumnos from "./CargarAlumnos";
 import React from 'react';
 import './styles.css';
 
+const LogoUAEH = ({ height = 80 }) => {
+  return (
+    <img
+      src="/src/assets/UAEH_Logo.png"
+      alt="Logo UAEH"
+      className="w-20 object-contain"
+      style={{ height: `${height}px` }}
+    />
+  );
+};
+const LogoPrepa6 = ({ height = 80 }) => {
+  return (
+    <img
+      src="/src/assets/Prepa6.png"
+      alt="Logo Prepa6"
+      className="w-20 object-contain"
+      style={{ height: `${height}px` }}
+    />
+  );
+};
+
 
 
 function RegistroAlumnos() {
@@ -61,21 +82,13 @@ function RegistroAlumnos() {
       alert('El número de cuenta debe tener 6 dígitos');
     }
   };
-<img src="/UAEH_Logo.png" alt="Logo UAEH" className="w-20 h-auto object-contain" />
   return (
-      
+    
     <div className="flex flex-col items-center justify-center min-h-screen bg-[#B91116] p-6 text-center text-white">
+      <LogoUAEH height={90} />
       {/* Barra de Navegación con Logos */}
-    <button className="text-[#B91116] font-bold px-4 py-2 rounded-lg hover:bg-gray-200" onClick={() => navigate('/registrar-alumno')}>
-      Registro de Alumnos
-    </button>
-    <button className="text-[#B91116] font-bold px-4 py-2 rounded-lg hover:bg-gray-200" onClick={() => navigate('/consultar-registros')}>
-      Consultas 
-    </button>
- 
-
-
-      {/* Formulario de Registro */}
+    <LogoPrepa6 height={80} />
+     {/* Formulario de Registro */}
       <div className="bg-white p-6 rounded-lg shadow-md w-96 flex flex-col items-center text-[#B91116] mt-6">
         <h2 className="text-xl font-bold mb-4">Registro de Entrada/Salida</h2>
         <input
@@ -92,11 +105,18 @@ function RegistroAlumnos() {
         >
           Registrar
         </button>
-        <button className="text-white mt-2" onClick={() => navigate('/subir-alumnos')}>
-          Subir Alumnos
-        </button>
+        {/*  */<br></br>}
+        
+        <button className="text-[#B91116] font-bold px-4 py-2 rounded-lg hover:bg-gray-200" onClick={() => navigate('/registrar-alumno')}>
+      Registro de Alumnos
+    </button>
+    <button className="text-[#B91116] font-bold px-4 py-2 rounded-lg hover:bg-gray-200" onClick={() => navigate('/consultar-registros')}>
+      Consultas 
+    </button>
       </div>
+
     </div>
+    
   );
 }
 

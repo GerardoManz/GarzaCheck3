@@ -2,10 +2,13 @@ import { useState } from "react";
 import Papa from "papaparse";
 import { db } from "./firebase";
 import { collection, addDoc } from "firebase/firestore";
+import FormularioRegistro from './FormularioRegistro';
+import { useNavigate } from "react-router-dom"; // Importamos useNavigate
 
 export default function CargarAlumnos() {
   const [archivo, setArchivo] = useState(null);
   const [subiendo, setSubiendo] = useState(false);
+  const navigate = useNavigate(); // Definimos navigate aquí
 
   const handleFileChange = (e) => {
     setArchivo(e.target.files[0]);
@@ -65,6 +68,11 @@ export default function CargarAlumnos() {
       >
         {subiendo ? "Subiendo..." : "Subir CSV"}
       </button>
+      <button
+          onClick={() => navigate("/registrar-alumno")}
+          className="mt-4 w-full bg-gray-500 text-white p-2 rounded-lg hover:bg-gray-600">
+          Regresar
+        </button>
     </div>
   );
 }
