@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 export default function ConsultarRegistros() {
   const [busqueda, setBusqueda] = useState('');
   const [registros, setRegistros] = useState([]);
+  const [mesSeleccionado, setMesSeleccionado] = useState(new Date().getMonth() + 1);
   const navigate = useNavigate();
 
   const handleSearch = async () => {
@@ -16,6 +17,12 @@ export default function ConsultarRegistros() {
       const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
       
       let registrosEncontrados = [...snap1.docs, ...snap2.docs].map((doc) => doc.data());
+
+      // Filtrar por el mes seleccionado
+      registrosEncontrados = registrosEncontrados.filter((registro) => {
+        const fecha = new Date((registro.fechaHora?.seconds ?? 0) * 1000);
+        return fecha.getMonth() + 1 === mesSeleccionado;
+      });
 
       // Ordenar los resultados por fechaHora de forma descendente
       registrosEncontrados.sort((a, b) => (b.fechaHora?.seconds ?? 0) - (a.fechaHora?.seconds ?? 0));
@@ -45,12 +52,26 @@ export default function ConsultarRegistros() {
         >
           Buscar
         </button>
+        {/* Selección de mes */}
+        <select
+        value={mesSeleccionado}
+        onChange={(e) => setMesSeleccionado(Number(e.target.value))}
+        className="w-full p-2 border rounded-lg mb-4 bg-[#B91116] text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+        {Array.from({ length: 12 }, (_, i) => (
+        <option key={i + 1} value={i + 1} className="text-gray-900">
+        {new Date(0, i).toLocaleString('es-ES', { month: 'long' })}
+        </option>
+        ))} 
+        </select>
+        
+        
       </div>
 
       {/* Contenedor con tamaño fijo y scroll interno */}
-      <div className="bg-white p-4 rounded-lg shadow-md w-96 mt-4 h-64 overflow-y-auto">
+      <div className="bg-white p-4 rounded-lg shadow-md w-96 mt-4 h-64 overflow-y-auto flex flex-col">
         {registros.length > 0 ? (
-          <ul className="list-disc">
+          <ul className="list-disc flex-grow overflow-y-auto">
             {registros.map((registro, index) => (
               <li key={index} className="mb-2">
                 {registro.nombre} - {registro.numCuenta} - {registro.estado} -{' '}
@@ -59,7 +80,7 @@ export default function ConsultarRegistros() {
             ))}
           </ul>
         ) : (
-          <p>No se encontraron registros.</p>
+          <p className="flex-grow flex items-center justify-center">No se encontraron registros.</p>
         )}
       </div>
   
