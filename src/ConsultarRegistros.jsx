@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { db } from './firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 export default function ConsultarRegistros() {
   const [busqueda, setBusqueda] = useState('');
@@ -15,10 +17,10 @@ export default function ConsultarRegistros() {
       const q2 = query(collection(db, 'registros'), where('nombre', '==', busqueda));
 
       const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-      
+
       let registrosEncontrados = [...snap1.docs, ...snap2.docs].map((doc) => doc.data());
 
-      // Filtrar por el mes seleccionado
+      // Filtrar por mes seleccionado
       registrosEncontrados = registrosEncontrados.filter((registro) => {
         const fecha = new Date((registro.fechaHora?.seconds ?? 0) * 1000);
         return fecha.getMonth() + 1 === mesSeleccionado;
@@ -26,17 +28,40 @@ export default function ConsultarRegistros() {
 
       // Ordenar los resultados por fechaHora de forma descendente
       registrosEncontrados.sort((a, b) => (b.fechaHora?.seconds ?? 0) - (a.fechaHora?.seconds ?? 0));
-      
+
       setRegistros(registrosEncontrados);
     } catch (error) {
       console.error('Error al buscar registros:', error);
     }
   };
 
+  const exportToExcel = () => {
+    if (registros.length === 0) {
+      alert('No hay registros para exportar.');
+      return;
+    }
+
+    const data = registros.map((registro) => ({
+      Nombre: registro.nombre,
+      "Número de Cuenta": registro.numCuenta,
+      Estado: registro.estado,
+      "Fecha y Hora": new Date((registro.fechaHora?.seconds ?? 0) * 1000).toLocaleString(),
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Registros");
+
+    const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const dataBlob = new Blob([excelBuffer], { type: "application/octet-stream" });
+
+    saveAs(dataBlob, `Registros_${busqueda}_${mesSeleccionado}.xlsx`);
+  };
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-6 text-center">
       <h2 className="text-xl font-bold mb-4">Consultar Registros</h2>
-      
+
       <div className="bg-white p-6 rounded-lg shadow-md w-96 flex flex-col items-center">
         {/* Formulario de búsqueda */}
         <input
@@ -52,20 +77,19 @@ export default function ConsultarRegistros() {
         >
           Buscar
         </button>
+
         {/* Selección de mes */}
         <select
-        value={mesSeleccionado}
-        onChange={(e) => setMesSeleccionado(Number(e.target.value))}
-        className="w-full p-2 border rounded-lg mb-4 bg-[#B91116] text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+          value={mesSeleccionado}
+          onChange={(e) => setMesSeleccionado(Number(e.target.value))}
+          className="w-full p-2 border rounded-lg mb-4 bg-[#B91116] text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
-        {Array.from({ length: 12 }, (_, i) => (
-        <option key={i + 1} value={i + 1} className="text-gray-900">
-        {new Date(0, i).toLocaleString('es-ES', { month: 'long' })}
-        </option>
-        ))} 
+          {Array.from({ length: 12 }, (_, i) => (
+            <option key={i + 1} value={i + 1} className="text-gray-900">
+              {new Date(0, i).toLocaleString('es-ES', { month: 'long' })}
+            </option>
+          ))}
         </select>
-        
-        
       </div>
 
       {/* Contenedor con tamaño fijo y scroll interno */}
@@ -83,7 +107,15 @@ export default function ConsultarRegistros() {
           <p className="flex-grow flex items-center justify-center">No se encontraron registros.</p>
         )}
       </div>
-  
+
+      {/* Botón de exportar a Excel */}
+      <button
+        onClick={exportToExcel}
+        className="mt-4 w-96 bg-green-600 text-white p-2 rounded-lg hover:bg-green-700"
+      >
+        Generar Reporte
+      </button>
+
       {/* Botón para regresar a la página principal */}
       <button
         onClick={() => navigate('/')}
