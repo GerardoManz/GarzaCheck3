@@ -82,7 +82,7 @@ export default function ConsultarRegistros() {
         <select
           value={mesSeleccionado}
           onChange={(e) => setMesSeleccionado(Number(e.target.value))}
-          className="w-full p-2 border rounded-lg mb-4 bg-[#B91116] text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full p-2 border rounded-lg mb-4 bg-[#B91116] text-black cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           {Array.from({ length: 12 }, (_, i) => (
             <option key={i + 1} value={i + 1} className="text-gray-900">
@@ -93,26 +93,26 @@ export default function ConsultarRegistros() {
       </div>
 
       {/* Contenedor con tamaño fijo y scroll interno */}
-      <div className="bg-white p-4 rounded-lg shadow-md w-96 mt-4 h-64 overflow-y-auto flex flex-col">
-        {registros.length > 0 ? (
-          <ul className="list-disc flex-grow overflow-y-auto">
-            {registros.map((registro, index) => (
-              <li key={index} className="mb-2">
-                {registro.nombre} - {registro.numCuenta} - {registro.estado} -{' '}
-                {new Date((registro.fechaHora?.seconds ?? 0) * 1000).toLocaleString()}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="flex-grow flex items-center justify-center">No se encontraron registros.</p>
-        )}
-      </div>
+      <div className="bg-white p-4 rounded-lg shadow-md w-96 mt-4 h-96 overflow-y-auto flex flex-col">
+  {registros.length > 0 ? (
+    <ul className="list-disc flex-grow overflow-y-auto">
+      {registros.map((registro, index) => (
+        <li key={index} className="mb-2">
+          {registro.nombre} - {registro.numCuenta} - {registro.estado} -{' '}
+          {new Date((registro.fechaHora?.seconds ?? 0) * 1000).toLocaleString()}
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <p className="flex-gr
+    ow flex items-center justify-center">No se encontraron registros.</p>
+  )}
+</div>
 
       {/* Botón de exportar a Excel */}
       <button
         onClick={exportToExcel}
-        className="mt-4 w-96 bg-green-600 text-white p-2 rounded-lg hover:bg-green-700"
-      >
+        className="mt-4 w-96 bg-green-600 text-white p-2 rounded-lg hover:bg-green-700">
         Generar Reporte
       </button>
 

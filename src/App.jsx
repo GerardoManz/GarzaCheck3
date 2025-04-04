@@ -24,7 +24,13 @@ function RegistroAlumnos() {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    const setFocus = () => {
+      inputRef.current?.focus();
+    };
+    
+    setFocus();
+    document.addEventListener('click', setFocus);
+    return () => document.removeEventListener('click', setFocus);
   }, []);
 
   const handleInputChange = (e) => {
@@ -37,11 +43,12 @@ function RegistroAlumnos() {
   const triggerError = (message) => {
     setErrorMessage(message);
     setShowError(true);
-    setNumCuenta(''); // Limpia el cuadro de texto
+    setNumCuenta('');
+
     setTimeout(() => {
       setShowError(false);
       setErrorMessage('');
-    }, 3000); // Se cierra automáticamente en 3 segundos
+    }, 3000);//3 SEGUNDOS DE ESPERA
   };
 
   const handleRegistro = async () => {
@@ -83,36 +90,30 @@ function RegistroAlumnos() {
       triggerError('Error al agregar registro.');
     }
   };
-
-  const handleBlur = () => {
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 100);
-  };
-
+  useEffect(() => {
+    if (showError) {
+      document.body.style.backgroundColor = ""; // Fondo blanco al mostrar error
+    } else {
+      document.body.style.backgroundColor = "#000000"; // Fondo negro cuando no hay error
+    }
+  }, [showError]);
+  
   return (
     <>
-      {/* Modal de Error (Simulando una ventana emergente) */}
-      {showError && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-white text-red-700 p-6 rounded-lg shadow-2xl w-[90%] max-w-md text-center animate-fadeIn">
-            <h2 className="text-2xl font-bold mb-3">⚠️ Error</h2>
-            <p className="text-lg">{errorMessage}</p>
-            <button 
-              onClick={() => setShowError(false)} 
-              className="mt-4 bg-red-600 text-white px-5 py-2 rounded-lg text-lg hover:bg-red-700"
-            >
-              Cerrar
-            </button>
-          </div>
-        </div>
-      )}
+    
+    {showError && (
+  <div className="fixed inset-0 z-[9999] bg-white bg-opacity-95 flex items-center justify-center">
+    <div className="text-center p-10 rounded-lg">
+      <div className="text-black font-extrabold mb-4" style={{ fontSize: '10vw' }}>🚨 ERROR</div>
+      <div className="text-black font-bold" style={{ fontSize: '6vw' }}>{errorMessage}</div>
+    </div>
+  </div>
+)}
 
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#B91116] p-6 text-center text-white">
         <LogoUAEH height={90} />
         <LogoPrepa6 height={80} />
 
-        {/*  Formulario de Registro */}
         <div className="bg-white p-6 rounded-lg shadow-md w-96 flex flex-col items-center text-[#B91116] mt-6">
           <h2 className="text-xl font-bold mb-4">Registro de Entrada/Salida</h2>
           <input
@@ -120,7 +121,6 @@ function RegistroAlumnos() {
             type="text"
             value={numCuenta}
             onChange={handleInputChange}
-            onBlur={handleBlur}
             onKeyDown={(e) => e.key === 'Enter' && handleRegistro()}
             className="w-full p-2 border rounded-lg text-center text-black"
             placeholder="Ingrese número de cuenta"
@@ -132,10 +132,10 @@ function RegistroAlumnos() {
             Registrar
           </button>
 
-          {/*  Botones de navegación */}
           <button className="text-[#B91116] font-bold px-4 py-2 rounded-lg hover:bg-gray-200 mt-2" onClick={() => navigate('/registrar-alumno')}>
-            Registro de Alumnos
+            Administracion de Alumnos
           </button>
+          {/*  */<br></br>}
           <button className="text-[#B91116] font-bold px-4 py-2 rounded-lg hover:bg-gray-200 mt-2" onClick={() => navigate('/consultar-registros')}>
             Consultas
           </button>
