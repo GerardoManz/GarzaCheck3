@@ -6,7 +6,7 @@ import FormularioRegistro from './FormularioRegistro';
 import ConsultarRegistros from './ConsultarRegistros';
 import CargarAlumnos from "./CargarAlumnos";
 import React from 'react';
-import './styles.css';
+import './styles.css'; 
 
 const LogoUAEH = ({ height = 80 }) => (
   <img src="/UAEH_Logo.png" alt="Logo UAEH" className="w-20 object-contain" style={{ height: `${height}px` }} />
@@ -48,7 +48,7 @@ function RegistroAlumnos() {
     setTimeout(() => {
       setShowError(false);
       setErrorMessage('');
-    }, 3000);//3 SEGUNDOS DE ESPERA
+    }, 3000);
   };
 
   const handleRegistro = async () => {
@@ -90,25 +90,42 @@ function RegistroAlumnos() {
       triggerError('Error al agregar registro.');
     }
   };
+
   useEffect(() => {
-    if (showError) {
-      document.body.style.backgroundColor = ""; // Fondo blanco al mostrar error
-    } else {
-      document.body.style.backgroundColor = "#000000"; // Fondo negro cuando no hay error
-    }
+    document.body.style.backgroundColor = showError ? "#ffffff" : "#000000";
   }, [showError]);
-  
+
   return (
     <>
-    
-    {showError && (
-  <div className="fixed inset-0 z-[9999] bg-white bg-opacity-95 flex items-center justify-center">
+      {showError && (
+  <div className="fixed inset-0 z-[9999] bg-white flex items-center justify-center animate-shake">
     <div className="text-center p-10 rounded-lg">
-      <div className="text-black font-extrabold mb-4" style={{ fontSize: '10vw' }}>🚨 ERROR</div>
-      <div className="text-black font-bold" style={{ fontSize: '6vw' }}>{errorMessage}</div>
+      <div
+        className="font-extrabold mb-4"
+        style={{
+          fontSize: '12vw',
+          color: '#B91116',
+          textShadow: '3px 3px 5px black',
+          fontWeight: 'bold'
+        }}
+      >
+        🚨 ERROR 🚨
+      </div>
+      <div
+        className="font-bold"
+        style={{
+          fontSize: '6vw',
+          color: '#B91116',
+          textShadow: '2px 2px 4px black',
+          fontWeight: 'bold'
+        }}
+      >
+        {errorMessage}
+      </div>
     </div>
   </div>
 )}
+
 
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#B91116] p-6 text-center text-white">
         <LogoUAEH height={90} />
@@ -131,11 +148,11 @@ function RegistroAlumnos() {
           >
             Registrar
           </button>
-
+{/*  */<br></br>}
           <button className="text-[#B91116] font-bold px-4 py-2 rounded-lg hover:bg-gray-200 mt-2" onClick={() => navigate('/registrar-alumno')}>
-            Administracion de Alumnos
+            Administración de Alumnos
           </button>
-          {/*  */<br></br>}
+         
           <button className="text-[#B91116] font-bold px-4 py-2 rounded-lg hover:bg-gray-200 mt-2" onClick={() => navigate('/consultar-registros')}>
             Consultas
           </button>
