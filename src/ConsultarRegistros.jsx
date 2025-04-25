@@ -12,6 +12,8 @@ export default function ConsultarRegistros() {
   const [registros, setRegistros] = useState([]);
   const [mesSeleccionado, setMesSeleccionado] = useState(new Date().getMonth() + 1);
   const navigate = useNavigate();
+  const currentYear = new Date().getFullYear();
+  const [anioSeleccionado, setAnioSeleccionado] = useState(currentYear);
 
   const handleSearch = async () => {
     try {
@@ -23,11 +25,21 @@ export default function ConsultarRegistros() {
       let registrosEncontrados = [...snap1.docs, ...snap2.docs].map((doc) => doc.data());
 
       // Filtrar por mes seleccionado
-      registrosEncontrados = registrosEncontrados.filter((registro) => {
-        const fecha = new Date((registro.fechaHora?.seconds ?? 0) * 1000);
-        return fecha.getMonth() + 1 === mesSeleccionado;
-      });
-      // Ordenar los resultados por fechaHora de forma // Ordenar los resultados por fechaHora de forma descendente
+      if (mesSeleccionado !== 0) {
+        registrosEncontrados = registrosEncontrados.filter((registro) => {
+          const fecha = new Date((registro.fechaHora?.seconds ?? 0) * 1000);
+          return fecha.getMonth() + 1 === mesSeleccionado;
+        });
+      }
+      
+      if (anioSeleccionado !== 0) {
+        registrosEncontrados = registrosEncontrados.filter((registro) => {
+          const fecha = new Date((registro.fechaHora?.seconds ?? 0) * 1000);
+          return fecha.getFullYear() === anioSeleccionado;
+        });
+      }
+         
+      // Ordenar los resultados por fechaHora de mas recientes a menos recientess
         registrosEncontrados.sort((a, b) => (b.fechaHora?.seconds ?? 0) - (a.fechaHora?.seconds ?? 0));
 
       setRegistros(registrosEncontrados);
@@ -48,17 +60,13 @@ export default function ConsultarRegistros() {
       Estado: registro.estado,
       "Fecha y Hora": new Date((registro.fechaHora?.seconds ?? 0) * 1000).toLocaleString(),
     }));
-
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Registros");
-
     const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
     const dataBlob = new Blob([excelBuffer], { type: "application/octet-stream" });
-
     saveAs(dataBlob, `Registros_${busqueda}_${mesSeleccionado}.xlsx`);
   };
-
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4 text-center">
   <h2 className="text-xl font-bold mb-4">Consultar Registros</h2>
@@ -81,16 +89,32 @@ export default function ConsultarRegistros() {
 
     {/* Selección de mes */}
     <select
-      value={mesSeleccionado}
-      onChange={(e) => setMesSeleccionado(Number(e.target.value))}
-      className="w-full p-2 border rounded-lg mb-4 bg-[#B91116] text-black cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
-    >
-      {Array.from({ length: 12 }, (_, i) => (
-        <option key={i + 1} value={i + 1} className="text-gray-900">
-          {new Date(0, i).toLocaleString('es-ES', { month: 'long' })}
-        </option>
-      ))}
-    </select>
+  value={mesSeleccionado}
+  onChange={(e) => setMesSeleccionado(Number(e.target.value))}
+  className="w-full p-2 border rounded-lg mb-4 bg-[#B91116] text-black cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+>
+  <option value={0} className="text-gray-900">Todos</option>
+  {Array.from({ length: 12 }, (_, i) => (
+    <option key={i + 1} value={i + 1} className="text-gray-900">
+      {new Date(0, i).toLocaleString('es-ES', { month: 'long' })}
+    </option>
+  ))}
+</select>
+<select
+  value={anioSeleccionado}
+  onChange={(e) => setAnioSeleccionado(Number(e.target.value))}
+  className="w-full p-2 border rounded-lg mb-4 bg-[#B91116] text-black cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+>
+  <option value={0} className="text-gray-900">Todos los años</option>
+  {Array.from({ length: 6 }, (_, i) => {
+    const year = currentYear - i;
+    return (
+      <option key={year} value={year} className="text-gray-900">
+        {year}
+      </option>
+    );
+  })}
+</select>
   </div>
 {/*  */<br></br>}
 {/* REGISTROS */}
@@ -118,8 +142,6 @@ export default function ConsultarRegistros() {
   )}
 </div>
 
-
-
   {/* Botón de exportar a Excel */}
   <button
     onClick={exportToExcel}
@@ -127,7 +149,6 @@ export default function ConsultarRegistros() {
   >
     Generar Reporte
   </button>
-
   {/* Botón para regresar a la página principal */}
   <button
     onClick={() => navigate('/')}
@@ -138,4 +159,3 @@ export default function ConsultarRegistros() {
 </div>
     );
   }
-
