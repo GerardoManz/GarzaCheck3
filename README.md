@@ -105,7 +105,7 @@ Cada documento representa un registro de entrada o salida de un alumno y contien
 | `fechaHora` | Timestamp | Marca de tiempo con fecha y hora exacta del registro  |
 | `fechaHoy`  | String    | Fecha del día en formato `DD/MM/YYYY` para filtrar registros diarios |
 
----
+
 
 ### Ejemplo de documento en `alumnos`
 
@@ -116,7 +116,7 @@ Cada documento representa un registro de entrada o salida de un alumno y contien
   "Grupo": "9",
   "Semestre": "9"
 }
-
+---
 ## ✨ Mejora futura
 
 - Autenticación de usuarios con Firebase Auth
