@@ -107,15 +107,7 @@ Cada documento representa un registro de entrada o salida de un alumno y contien
 
 
 
-### Ejemplo de documento en `alumnos`
 
-```json
-{
-  "numCuenta": "448921",
-  "nombre": "Obregon Ceron Hebert",
-  "Grupo": "9",
-  "Semestre": "9"
-}
 ---
 ## ✨ Mejora futura
 
@@ -123,6 +115,7 @@ Cada documento representa un registro de entrada o salida de un alumno y contien
 - Control de acceso por roles (admin, maestro, etc.)
 - Reportes en PDF
 - Dashboard visual con estadísticas
+- Mejora en la busqueda por nombres
 
 ---
 
