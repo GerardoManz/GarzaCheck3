@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from "react-router-dom";
-import { db } from "./firebase"; // Asegúrate de importar la configuración de Firebase
-import { collection, addDoc } from "firebase/firestore";
+import { BrowserRouter as Router, Routes, Route, useNavigate } from "react-router-dom";
+import { db } from "./firebase";
+import { collection, addDoc, query, where, getDocs, orderBy, limit } from "firebase/firestore";
 
 function RegistroAlumnos() {
   const [numeroCuenta, setNumeroCuenta] = useState("");
@@ -17,13 +17,45 @@ function RegistroAlumnos() {
   const handleRegistro = async () => {
     if (numeroCuenta.length === 6) {
       const fechaHora = new Date();
-      const estado = Math.random() < 0.5 ? "Entrada" : "Salida"; // Alterna entre entrada y salida (esto se puede ajustar más)
 
       try {
-        // Aquí obtienes el nombre del alumno, puedes obtenerlo de la base de datos o desde un estado
-        const nombreAlumno = "Hebert Obregon Ceron"; // Esto debe ser consultado desde Firebase
+        // 1. Consultar el último registro de este alumno
+        const registrosRef = collection(db, "registros");
+        const q = query(
+          registrosRef,
+          where("numeroCuenta", "==", numeroCuenta),
+          orderBy("fechaHora", "desc"),
+          limit(1)
+        );
 
-        // Agrega el registro en la colección 'registros'
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+          const ultimoRegistro = querySnapshot.docs[0].data();
+          const ultimoTiempo = ultimoRegistro.fechaHora.toDate
+            ? ultimoRegistro.fechaHora.toDate()
+            : new Date(ultimoRegistro.fechaHora);
+
+          const diferenciaMinutos = (fechaHora - ultimoTiempo) / (1000 * 60);
+
+          if (diferenciaMinutos < 5) {
+            alert(
+              `Este alumno ya fue registrado hace ${Math.floor(
+                diferenciaMinutos
+              )} minutos. Intente de nuevo más tarde.`
+            );
+            setNumeroCuenta("");
+            return; // No registrar
+          }
+        }
+
+        // 2. Asignar Entrada o Salida (puedes ajustar la lógica)
+        const estado = Math.random() < 0.5 ? "Entrada" : "Salida";
+
+        // 3. Aquí deberías obtener el nombre real desde la base de datos
+        const nombreAlumno = "Hebert Obregon Ceron";
+
+        // 4. Registrar en Firestore
         await addDoc(collection(db, "registros"), {
           numeroCuenta,
           nombre: nombreAlumno,
@@ -31,7 +63,6 @@ function RegistroAlumnos() {
           fechaHora,
         });
 
-        // Después de registrar, reseteas el campo
         setNumeroCuenta("");
         console.log("Registro exitoso");
       } catch (error) {
@@ -79,8 +110,7 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/" element={<RegistroAlumnos />} />
-        {/* Aquí se incluirían las otras rutas, por ejemplo: */}
-        <Route path="/registrar-alumno" element={<FormularioRegistro />} />
+        {/* Otras rutas */}
       </Routes>
     </Router>
   );
