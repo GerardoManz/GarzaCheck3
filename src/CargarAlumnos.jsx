@@ -1,7 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Papa from "papaparse";
 import { db } from "./firebase";
-import { collection, addDoc, query, where, getDocs, writeBatch, doc } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  writeBatch,
+  doc,
+} from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 
 export default function CargarAlumnos() {
@@ -9,7 +16,18 @@ export default function CargarAlumnos() {
   const [subiendo, setSubiendo] = useState(false);
   const navigate = useNavigate();
 
-  // 1️⃣ Manejar cambio de archivo
+  // 🖼️ Fondo en <body> SOLO mientras este componente está montado
+  useEffect(() => {
+    const prev = document.body.style.backgroundColor;
+    document.body.style.backgroundColor = 'black';
+  
+    return () => {
+      document.body.style.backgroundColor = prev || '';
+    };
+  }, []);
+  
+
+  // Manejar cambio de archivo
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -19,7 +37,7 @@ export default function CargarAlumnos() {
       return;
     }
 
-    if (file.size > 2 * 1024 * 1024) { // 2MB
+    if (file.size > 2 * 1024 * 1024) {
       alert("El archivo es demasiado grande (máximo 2MB).");
       return;
     }
@@ -27,7 +45,7 @@ export default function CargarAlumnos() {
     setArchivo(file);
   };
 
-  // 2️⃣ Leer archivo CSV y convertir a objetos
+  // Leer archivo CSV
   const leerArchivoCSV = () => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -55,14 +73,14 @@ export default function CargarAlumnos() {
     });
   };
 
-  // 3️⃣ Verificar si un alumno ya existe en Firestore
+  // Verificar si un alumno ya existe
   const alumnoExiste = async (numCuenta) => {
     const q = query(collection(db, "alumnos"), where("numCuenta", "==", numCuenta));
     const snapshot = await getDocs(q);
     return !snapshot.empty;
   };
 
-  // 4️⃣ Subir alumnos a Firestore con batch
+  // Subir alumnos a Firestore
   const subirAlumnos = async (alumnos) => {
     const batch = writeBatch(db);
     let duplicados = 0;
@@ -84,7 +102,7 @@ export default function CargarAlumnos() {
     return { duplicados, nuevos };
   };
 
-  // 5️⃣ Función principal de carga
+  // Proceso principal de carga
   const subirDatos = async () => {
     if (!archivo) {
       alert("Selecciona un archivo CSV primero.");
@@ -107,40 +125,58 @@ export default function CargarAlumnos() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-6">
-      <h2 className="text-xl font-bold mb-4">Subir Alumnos desde CSV</h2>
+    <div className="flex flex-col items-center justify-center min-h-screen p-6 text-center text-white">
+      <h2 className="text-xl font-bold mb-6">Subir Alumnos desde CSV</h2>
 
-      <input type="file" accept=".csv" onChange={handleFileChange} className="mb-4" />
-
-      {/* Botón subir CSV en verde */}
-      <button
-        onClick={subirDatos}
-        disabled={subiendo}
+      {/* Contenedor que resalta la zona de interacción */}
+      <div
         style={{
-          backgroundColor: "#065f46", // verde oscuro
-          color: "#fff",
-          padding: "0.5rem",
+          backgroundColor: "rgba(255,255,255,0.9)",
+          padding: "1.5rem",
           borderRadius: "0.5rem",
-          cursor: subiendo ? "not-allowed" : "pointer",
-          opacity: subiendo ? 0.7 : 1
+          boxShadow: "0 4px 15px rgba(0,0,0,0.3)",
+          width: "100%",
+          maxWidth: "400px",
+          color: "#000",
         }}
       >
-        {subiendo ? "Subiendo..." : "Subir CSV"}
-      </button>
+        <input
+          type="file"
+          accept=".csv"
+          onChange={handleFileChange}
+          className="mb-4 w-full"
+        />
 
-      <button
-        onClick={() => navigate("/registrar-alumno")}
-        style={{
-          backgroundColor: "#374151", // gris oscuro
-          color: "#fff",
-          padding: "0.5rem",
-          borderRadius: "0.5rem",
-          marginTop: "1rem"
-        }}
-        className="w-full"
-      >
-        Regresar
-      </button>
+        <button
+          onClick={subirDatos}
+          disabled={subiendo}
+          style={{
+            backgroundColor: "#065f46",
+            color: "#fff",
+            padding: "0.5rem",
+            borderRadius: "0.5rem",
+            cursor: subiendo ? "not-allowed" : "pointer",
+            opacity: subiendo ? 0.7 : 1,
+            width: "100%",
+          }}
+        >
+          {subiendo ? "Subiendo..." : "Subir CSV"}
+        </button>
+
+        <button
+          onClick={() => navigate("/registrar-alumno")}
+          style={{
+            backgroundColor: "#374151",
+            color: "#fff",
+            padding: "0.5rem",
+            borderRadius: "0.5rem",
+            marginTop: "1rem",
+            width: "100%",
+          }}
+        >
+          Regresar
+        </button>
+      </div>
     </div>
   );
 }

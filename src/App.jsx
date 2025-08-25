@@ -1,81 +1,292 @@
 import { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
 import { db } from './firebase';
-import { collection, addDoc, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  orderBy,
+  limit,
+  doc,
+  runTransaction,
+  serverTimestamp,
+} from 'firebase/firestore';
 import FormularioRegistro from './FormularioRegistro';
 import ConsultarRegistros from './ConsultarRegistros';
 import CargarAlumnos from "./CargarAlumnos";
 import React from 'react';
 import './styles.css';
 
+/* ===================== Logos ===================== */
 const LogoUAEH = ({ height = 80 }) => (
-  <img src="/UAEH_Logo.png" alt="Logo UAEH" className="w-20 object-contain" style={{ height: `${height}px` }} />
+  <img src="/garza.png" alt="Logo UAEH" className="w-20 object-contain" style={{ height: `${height}px` }} />
 );
-
 const LogoPrepa6 = ({ height = 80 }) => (
   <img src="/Prepa6.png" alt="Logo Prepa6" className="w-20 object-contain" style={{ height: `${height}px` }} />
 );
 
-function RegistroAlumnos() {
+/* ===================== Utils ===================== */
+const onlyDigits6 = (s) => (s ?? '').toString().replace(/\D+/g, '').slice(0, 6);
+const yyyymmddLocal = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+/* ===================== Escáner global =====================
+   - Filtrado anti-doble: si el foco está en input/textarea/contentEditable, NO dispara.
+   - Si el foco NO está en un campo editable, acumula y al llegar a 6 dispara onScan.
+*/
+function GlobalKeyScanner({ onScan, reflectInInput }) {
+  const bufRef = useRef('');
+  const tRef = useRef(null);
+
+  useEffect(() => {
+    const flushIfReady = () => {
+      const v = onlyDigits6(bufRef.current);
+      if (v.length === 6) {
+        reflectInInput?.(v);
+        onScan?.(v);
+      }
+      bufRef.current = '';
+    };
+
+    const onKeyDown = (e) => {
+      // === FILTRO ANTI-DOBLE DISPARO ===
+      const tag = (e.target?.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
+
+      if (e.key === 'Enter') {
+        flushIfReady();
+        clearTimeout(tRef.current);
+        tRef.current = null;
+        return;
+      }
+      if (/^\d$/.test(e.key)) {
+        bufRef.current = onlyDigits6(bufRef.current + e.key);
+        if (bufRef.current.length === 6) {
+          flushIfReady();
+          clearTimeout(tRef.current);
+          tRef.current = null;
+        } else {
+          clearTimeout(tRef.current);
+          tRef.current = setTimeout(() => {
+            flushIfReady();
+            tRef.current = null;
+          }, 150);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      clearTimeout(tRef.current);
+    };
+  }, [onScan, reflectInInput]);
+
+  return null;
+}
+
+/* ===================== Pantalla de registro (UI) ===================== */
+function RegistroAlumnos({ onRegistrarGlobal, bindReflectInput, bindResetInput }) {
   const [numCuenta, setNumCuenta] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
-  const [showError, setShowError] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
   const navigate = useNavigate();
   const inputRef = useRef(null);
 
-  // Autoenfoque en el input
+  // Timer para auto-submit cuando el input llega a 6 dígitos
+  const submitTimerRef = useRef(null);
+
+  // Fondo en toda la pantalla SOLO mientras este componente está montado.
   useEffect(() => {
-    const setFocus = () => {
-      inputRef.current?.focus();
-    };
-    setFocus();
-    document.addEventListener('click', setFocus);
-    return () => document.removeEventListener('click', setFocus);
+    const prev = document.body.style.backgroundColor;
+    document.body.style.backgroundColor = 'black';
+    return () => { document.body.style.backgroundColor = prev || ''; };
   }, []);
 
-  // Control estricto del input: solo 6 dígitos
+  // Auto enfoque
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  // Permitir que App refleje el número escaneado en este input
+  useEffect(() => {
+    bindReflectInput?.((v) => {
+      clearTimeout(submitTimerRef.current);
+      const val = onlyDigits6(v);
+      setNumCuenta(val);
+      requestAnimationFrame(() => inputRef.current?.focus());
+      // Auto-submit si el lector no manda Enter
+      if (val.length === 6) {
+        submitTimerRef.current = setTimeout(() => {
+          onRegistrarGlobal(val);
+        }, 150);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Permitir que App limpie el input tras cualquier alerta (éxito/error)
+  useEffect(() => {
+    bindResetInput?.(() => {
+      clearTimeout(submitTimerRef.current);
+      setNumCuenta('');
+      requestAnimationFrame(() => inputRef.current?.focus());
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    return () => clearTimeout(submitTimerRef.current);
+  }, []);
+
+  // Solo 6 dígitos + auto-submit si el lector no manda Enter
   const handleInputChange = (e) => {
     const value = e.target.value;
-    if (/^\d{0,6}$/.test(value)) {
-      setNumCuenta(value);
+    if (!/^\d{0,6}$/.test(value)) return;
+
+    clearTimeout(submitTimerRef.current);
+    setNumCuenta(value);
+
+    if (value.length === 6) {
+      submitTimerRef.current = setTimeout(() => {
+        onRegistrarGlobal(value);
+      }, 150);
     }
   };
 
-  // Mostrar error
+  const handleRegistro = () => {
+    clearTimeout(submitTimerRef.current);
+    onRegistrarGlobal(numCuenta);
+  };
+
+  const handleEnter = (e) => {
+    if (e.key === 'Enter') {
+      clearTimeout(submitTimerRef.current);
+      onRegistrarGlobal(numCuenta);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen w-full p-6 text-center text-white">
+      <LogoUAEH height={90} />
+      <LogoPrepa6 height={80} />
+
+      <div className="bg-white p-6 rounded-lg shadow-md w-96 flex flex-col items-center text-[#B91116] mt-6">
+        <h2 className="text-xl font-bold mb-4">Registro de Entrada/Salida</h2>
+        <input
+          ref={inputRef}
+          type="text"
+          value={numCuenta}
+          onChange={handleInputChange}
+          onKeyDown={handleEnter}
+          className="w-full p-2 border rounded-lg text-center text-black"
+          placeholder="Ingrese número de cuenta"
+          maxLength={6}
+          inputMode="numeric"
+          pattern="\d*"
+        />
+
+        <button
+          onClick={handleRegistro}
+          style={{ backgroundColor: '#7f1d1d', color: '#fff', padding: '0.5rem', marginTop: '1rem', borderRadius: '0.5rem', fontWeight: 'bold' }}
+          className="w-full"
+        >
+          Registrar
+        </button>
+
+        <button
+          onClick={() => navigate('/registrar-alumno')}
+          style={{ backgroundColor: '#065f46', color: '#fff', padding: '0.5rem', marginTop: '0.5rem', borderRadius: '0.5rem', fontWeight: 'bold' }}
+          className="w-full"
+        >
+          Administración de Alumnos
+        </button>
+
+        <button
+          onClick={() => navigate('/consultar-registros')}
+          style={{ backgroundColor: '#374151', color: '#fff', padding: '0.5rem', marginTop: '0.5rem', borderRadius: '0.5rem', fontWeight: 'bold' }}
+          className="w-full"
+        >
+          Consultas
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== App con registro GLOBAL + overlays globales ===================== */
+function AppInner() {
+  // Overlays globales
+  const [showError, setShowError] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const tErr = useRef(null);
+  const tOk = useRef(null);
+
+  // Candado contra solicitudes simultáneas por la misma cuenta
+  const inFlightByCuenta = useRef(new Set()); // Set<numCuenta>
+
+  // Para reflejar el escaneo en el input de RegistroAlumnos si está montado
+  const reflectInputFnRef = useRef(null);
+  const bindReflectInput = (fn) => { reflectInputFnRef.current = fn; };
+  const reflectInInput = (v) => { reflectInputFnRef.current?.(v); };
+
+  // Para limpiar el input tras cada alerta
+  const resetInputFnRef = useRef(null);
+  const bindResetInput = (fn) => { resetInputFnRef.current = fn; };
+  const resetInput = () => resetInputFnRef.current?.();
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(tErr.current);
+      clearTimeout(tOk.current);
+    };
+  }, []);
+
   const triggerError = (message) => {
+    // Limpia input para permitir siguiente escaneo
+    resetInput();
+    clearTimeout(tErr.current);
     setErrorMessage(message);
     setShowError(true);
-    setNumCuenta('');
-    setTimeout(() => {
+    tErr.current = setTimeout(() => {
       setShowError(false);
       setErrorMessage('');
     }, 3000);
   };
 
-  // Mostrar éxito
   const triggerSuccess = (message) => {
+    // Limpia input para permitir siguiente escaneo
+    resetInput();
+    clearTimeout(tOk.current);
     setSuccessMessage(message);
     setShowSuccess(true);
-    setNumCuenta('');
-    setTimeout(() => {
+    tOk.current = setTimeout(() => {
       setShowSuccess(false);
       setSuccessMessage('');
     }, 3000);
   };
 
-  // Registro de entrada/salida con 5 min de enfriamiento y tope de 2 registros por día
-  const handleRegistro = async () => {
+  // === Registrador GLOBAL: idempotente y anti-duplicados ===
+  const registrarGlobal = async (numCuentaRaw) => {
+    const numCuenta = onlyDigits6(numCuentaRaw);
+
+    // Candado simple en cliente
+    if (!numCuenta || numCuenta.length !== 6) {
+      triggerError('El número de cuenta debe tener 6 dígitos');
+      return;
+    }
+    if (inFlightByCuenta.current.has(numCuenta)) return;
+    inFlightByCuenta.current.add(numCuenta);
+
     try {
-      if (numCuenta.length !== 6) {
-        triggerError('El número de cuenta debe tener 6 dígitos');
-        return;
-      }
+      const fechaHoyBonita = new Date().toLocaleDateString(); // legible local (MX)
+      const diaId = yyyymmddLocal();                           // clave estable YYYY-MM-DD
 
-      const fechaHoy = new Date().toLocaleDateString();
-
-      // 1) Validar que el alumno exista
+      // 1) Validar alumno
       const qAlumno = query(collection(db, 'alumnos'), where('numCuenta', '==', numCuenta));
       const snapAlumno = await getDocs(qAlumno);
       if (snapAlumno.empty) {
@@ -84,26 +295,22 @@ function RegistroAlumnos() {
       }
       const alumno = snapAlumno.docs[0].data();
 
-      // 2) Traer registros de hoy para alternar Entrada/Salida y limitar a 2 por día
+      // 2) Contar registros de HOY (usa tu campo existente `fechaHoy`)
       const qHoy = query(
         collection(db, 'registros'),
         where('numCuenta', '==', numCuenta),
-        where('fechaHoy', '==', fechaHoy)
+        where('fechaHoy', '==', fechaHoyBonita)
       );
       const snapHoy = await getDocs(qHoy);
+      const registrosHoy = snapHoy.size;
 
-      if (snapHoy.size >= 2) {
+      if (registrosHoy >= 2) {
         triggerError('Ya cuenta con 2 registros el día de hoy.');
         return;
       }
 
-      // Determinar estado por alternancia (0->Entrada, 1->Salida)
-      const estado = snapHoy.size % 2 === 0 ? 'Entrada' : 'Salida';
-
-      // 3) Enfriamiento de 5 minutos contra el ÚLTIMO registro (de cualquier día)
+      // 3) Enfriamiento 5 min (último registro por fechaHora)
       let ultimoRegistroFecha = null;
-
-      // Intento principal: numCuenta == y orderBy fechaHora desc limit 1
       try {
         const qUltimo = query(
           collection(db, 'registros'),
@@ -116,8 +323,8 @@ function RegistroAlumnos() {
           const fh = snapUltimo.docs[0].data().fechaHora;
           ultimoRegistroFecha = fh?.toDate ? fh.toDate() : new Date(fh);
         }
-      } catch (e) {
-        // Fallback (por si Firestore pide índice): consultar todos por numCuenta y calcular el más reciente en memoria
+      } catch {
+        // Fallback si no permite orderBy (sin índice)
         const qSoloNum = query(collection(db, 'registros'), where('numCuenta', '==', numCuenta));
         const snapSoloNum = await getDocs(qSoloNum);
         snapSoloNum.forEach((d) => {
@@ -136,156 +343,131 @@ function RegistroAlumnos() {
         }
       }
 
-      // 👉 Mostrar ÉXITO de inmediato (optimista) porque ya pasó todas las validaciones
-      //    Si la escritura fallara, ocultamos este éxito y mostramos error en el catch.
-      triggerSuccess(`${estado} registrada para ${alumno.nombre}`);
+      // 4) Turno: 0 -> Entrada, 1 -> Salida
+      const turno = (registrosHoy % 2 === 0) ? 1 : 2;
+      const estado = turno === 1 ? 'Entrada' : 'Salida';
 
-      // 4) Guardar en Firestore
-      await addDoc(collection(db, 'registros'), {
-        numCuenta,
-        nombre: alumno.nombre,
-        estado,
-        fechaHora: new Date(), // Firestore lo guarda como Timestamp
-        fechaHoy,
+      // 5) Escritura idempotente con transacción + ID determinístico
+      //    - {numCuenta}-{diaId}-1  (Entrada de hoy)
+      //    - {numCuenta}-{diaId}-2  (Salida  de hoy)
+      const doc1 = doc(db, 'registros', `${numCuenta}-${diaId}-1`);
+      const doc2 = doc(db, 'registros', `${numCuenta}-${diaId}-2`);
+
+      await runTransaction(db, async (tx) => {
+        const s1 = await tx.get(doc1);
+        const s2 = await tx.get(doc2);
+
+        // Si ya hay ambos, aborta
+        if (s1.exists() && s2.exists()) {
+          throw new Error('YA_HAY_DOS');
+        }
+
+        if (turno === 1) {
+          // Entrada
+          if (!s1.exists()) {
+            tx.set(doc1, {
+              numCuenta,
+              nombre: alumno.nombre,
+              estado: 'Entrada',
+              fechaHora: serverTimestamp(),
+              fechaHoy: fechaHoyBonita,
+              diaId,
+              turno: 1,
+            });
+          }
+        } else {
+          // Salida
+          if (!s2.exists()) {
+            tx.set(doc2, {
+              numCuenta,
+              nombre: alumno.nombre,
+              estado: 'Salida',
+              fechaHora: serverTimestamp(),
+              fechaHoy: fechaHoyBonita,
+              diaId,
+              turno: 2,
+            });
+          }
+        }
       });
 
-      // Reenfocar input
-      inputRef.current?.focus();
+      // Éxito (post-transacción)
+      triggerSuccess(`${estado} registrada para ${alumno.nombre}`);
     } catch (err) {
-      console.error(err);
-      // Si llega aquí, la escritura falló ⇒ ocultamos el éxito (si quedó visible) y mostramos error
-      setShowSuccess(false);
-      setSuccessMessage('');
-      triggerError('Ocurrió un problema al registrar. Intente de nuevo.');
+      if (err?.message === 'YA_HAY_DOS') {
+        triggerError('Ya cuenta con 2 registros el día de hoy.');
+      } else {
+        console.error(err);
+        setShowSuccess(false);
+        setSuccessMessage('');
+        triggerError('Ocurrió un problema al registrar. Intente de nuevo.');
+      }
+    } finally {
+      inFlightByCuenta.current.delete(numCuenta);
     }
   };
 
-  // Cambiar fondo según mensaje
-  useEffect(() => {
-    if (showError) {
-      document.body.style.backgroundColor = "#ffffff";
-    } else if (showSuccess) {
-      document.body.style.backgroundColor = "#065f46";
-    } else {
-      document.body.style.backgroundColor = "#000000";
-    }
-  }, [showError, showSuccess]);
+  // === Escaneo: REGISTRA SIEMPRE (cualquier pantalla) y refleja en input si procede ===
+  const handleScan6 = (cuenta6) => {
+    reflectInInput(cuenta6); // ver el número en pantalla si estás en "/"
+    registrarGlobal(cuenta6);
+  };
 
   return (
     <>
+      {/* Overlays globales */}
       {showError && (
-        <div className="fixed inset-0 z-[9999] bg-white flex items-center justify-center animate-shake">
+        <div className="fixed inset-0 z-[9999] bg-white/80 flex items-center justify-center animate-shake">
           <div className="text-center p-10 rounded-lg">
-            <div
-              className="font-extrabold mb-4"
-              style={{ fontSize: '12vw', color: '#B91116', textShadow: '3px 3px 5px black' }}
-            >
+            <div className="font-extrabold mb-4" style={{ fontSize: '12vw', color: '#B91116', textShadow: '3px 3px 5px black' }}>
               🚨 ERROR 🚨
             </div>
-            <div
-              className="font-bold"
-              style={{ fontSize: '6vw', color: '#B91116', textShadow: '2px 2px 4px black' }}
-            >
+            <div className="font-bold" style={{ fontSize: '6vw', color: '#B91116', textShadow: '2px 2px 4px black' }}>
               {errorMessage}
             </div>
           </div>
         </div>
       )}
-
       {showSuccess && (
-        <div className="fixed inset-0 z-[9999] bg-green-700 flex items-center justify-center">
+        <div className="fixed inset-0 z-[9999] bg-green-700/80 flex items-center justify-center">
           <div className="text-center p-10 rounded-lg">
-            <div
-              className="font-extrabold mb-4"
-              style={{ fontSize: '12vw', color: '#ffffff', textShadow: '3px 3px 5px black' }}
-            >
+            <div className="font-extrabold mb-4" style={{ fontSize: '12vw', color: '#ffffff', textShadow: '3px 3px 5px black' }}>
               ✅ REGISTRO
             </div>
-            <div
-              className="font-bold"
-              style={{ fontSize: '6vw', color: '#ffffff', textShadow: '2px 2px 4px black' }}
-            >
+            <div className="font-bold" style={{ fontSize: '6vw', color: '#ffffff', textShadow: '2px 2px 4px black' }}>
               {successMessage}
             </div>
           </div>
         </div>
       )}
 
-      <div className="flex flex-col items-center justify-center min-h-screen bg-[#B91116] p-6 text-center text-white">
-        <LogoUAEH height={90} />
-        <LogoPrepa6 height={80} />
+      {/* Escáner global */}
+      <GlobalKeyScanner onScan={handleScan6} reflectInInput={reflectInInput} />
 
-        <div className="bg-white p-6 rounded-lg shadow-md w-96 flex flex-col items-center text-[#B91116] mt-6">
-          <h2 className="text-xl font-bold mb-4">Registro de Entrada/Salida</h2>
-          <input
-            ref={inputRef}
-            type="text"
-            value={numCuenta}
-            onChange={handleInputChange}
-            onKeyDown={(e) => e.key === 'Enter' && handleRegistro()}
-            className="w-full p-2 border rounded-lg text-center text-black"
-            placeholder="Ingrese número de cuenta"
-          />
-
-        <button
-            onClick={handleRegistro}
-            style={{
-              backgroundColor: '#7f1d1d',
-              color: '#fff',
-              padding: '0.5rem',
-              marginTop: '1rem',
-              borderRadius: '0.5rem',
-              fontWeight: 'bold'
-            }}
-            className="w-full"
-          >
-            Registrar
-          </button>
-
-          <button
-            onClick={() => navigate('/registrar-alumno')}
-            style={{
-              backgroundColor: '#065f46',
-              color: '#fff',
-              padding: '0.5rem',
-              marginTop: '0.5rem',
-              borderRadius: '0.5rem',
-              fontWeight: 'bold'
-            }}
-            className="w-full"
-          >
-            Administración de Alumnos
-          </button>
-
-          <button
-            onClick={() => navigate('/consultar-registros')}
-            style={{
-              backgroundColor: '#374151',
-              color: '#fff',
-              padding: '0.5rem',
-              marginTop: '0.5rem',
-              borderRadius: '0.5rem',
-              fontWeight: 'bold'
-            }}
-            className="w-full"
-          >
-            Consultas
-          </button>
-        </div>
-      </div>
-    </>
-  );
-}
-
-export default function App() {
-  return (
-    <Router>
       <Routes>
-        <Route path="/" element={<RegistroAlumnos />} />
+        <Route
+          path="/"
+          element={
+            <RegistroAlumnos
+              onRegistrarGlobal={registrarGlobal}
+              bindReflectInput={bindReflectInput}
+              bindResetInput={bindResetInput}
+            />
+          }
+        />
         <Route path="/registrar-alumno" element={<FormularioRegistro />} />
         <Route path="/consultar-registros" element={<ConsultarRegistros />} />
         <Route path="/subir-alumnos" element={<CargarAlumnos />} />
       </Routes>
+    </>
+  );
+}
+
+/* ===================== Router raíz ===================== */
+export default function App() {
+  return (
+    <Router>
+      <AppInner />
     </Router>
   );
 }
