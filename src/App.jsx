@@ -35,11 +35,39 @@ const yyyymmddLocal = () => {
   const d = String(now.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const isRetryableFirestoreError = (err) => {
+  const code = err?.code || err?.message || '';
+  return ['unavailable', 'deadline-exceeded', 'aborted', 'internal'].some(k => code.includes(k));
+};
+async function withRetry(fn, { retries = 4, base = 300 } = {}) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      attempt++;
+      if (attempt > retries || !isRetryableFirestoreError(err)) throw err;
+      await sleep(base * Math.pow(2, attempt - 1)); // 300, 600, 1200, 2400...
+    }
+  }
+}
+const humanFirestoreError = (err) => {
+  const code = err?.code || '';
+  if (!navigator.onLine || code.includes('unavailable')) return 'Sin conexión o red inestable. Reintentaremos...';
+  if (code.includes('deadline-exceeded')) return 'Servidor tardó demasiado. Reintentando...';
+  if (code.includes('permission-denied')) return 'Permisos denegados por reglas de Firestore.';
+  if (code.includes('FAILED_PRECONDITION')) return 'Falta un índice/condición en Firestore.';
+  if (err?.message === 'YA_HAY_DOS') return 'Ya cuenta con 2 registros el día de hoy.';
+  return err?.message || 'Ocurrió un problema al registrar.';
+};
+const waitUntilOnline = () => new Promise((resolve) => {
+  if (navigator.onLine) return resolve();
+  const on = () => { window.removeEventListener('online', on); resolve(); };
+  window.addEventListener('online', on);
+});
 
-/* ===================== Escáner global =====================
-   - Filtrado anti-doble: si el foco está en input/textarea/contentEditable, NO dispara.
-   - Si el foco NO está en un campo editable, acumula y al llegar a 6 dispara onScan.
-*/
+/* ===================== Escáner global ===================== */
 function GlobalKeyScanner({ onScan, reflectInInput }) {
   const bufRef = useRef('');
   const tRef = useRef(null);
@@ -55,7 +83,6 @@ function GlobalKeyScanner({ onScan, reflectInInput }) {
     };
 
     const onKeyDown = (e) => {
-      // === FILTRO ANTI-DOBLE DISPARO ===
       const tag = (e.target?.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
 
@@ -76,7 +103,7 @@ function GlobalKeyScanner({ onScan, reflectInInput }) {
           tRef.current = setTimeout(() => {
             flushIfReady();
             tRef.current = null;
-          }, 150);
+          }, 120);
         }
       }
     };
@@ -92,42 +119,35 @@ function GlobalKeyScanner({ onScan, reflectInInput }) {
 }
 
 /* ===================== Pantalla de registro (UI) ===================== */
-function RegistroAlumnos({ onRegistrarGlobal, bindReflectInput, bindResetInput }) {
+function RegistroAlumnos({ onEnqueueRegistro, bindReflectInput, bindResetInput }) {
   const [numCuenta, setNumCuenta] = useState('');
   const navigate = useNavigate();
   const inputRef = useRef(null);
-
-  // Timer para auto-submit cuando el input llega a 6 dígitos
   const submitTimerRef = useRef(null);
 
-  // Fondo en toda la pantalla SOLO mientras este componente está montado.
   useEffect(() => {
     const prev = document.body.style.backgroundColor;
     document.body.style.backgroundColor = 'black';
     return () => { document.body.style.backgroundColor = prev || ''; };
   }, []);
 
-  // Auto enfoque
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  // Permitir que App refleje el número escaneado en este input
   useEffect(() => {
     bindReflectInput?.((v) => {
       clearTimeout(submitTimerRef.current);
       const val = onlyDigits6(v);
       setNumCuenta(val);
       requestAnimationFrame(() => inputRef.current?.focus());
-      // Auto-submit si el lector no manda Enter
       if (val.length === 6) {
         submitTimerRef.current = setTimeout(() => {
-          onRegistrarGlobal(val);
-        }, 150);
+          onEnqueueRegistro(val);
+        }, 100);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Permitir que App limpie el input tras cualquier alerta (éxito/error)
   useEffect(() => {
     bindResetInput?.(() => {
       clearTimeout(submitTimerRef.current);
@@ -137,34 +157,27 @@ function RegistroAlumnos({ onRegistrarGlobal, bindReflectInput, bindResetInput }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    return () => clearTimeout(submitTimerRef.current);
-  }, []);
+  useEffect(() => () => clearTimeout(submitTimerRef.current), []);
 
-  // Solo 6 dígitos + auto-submit si el lector no manda Enter
   const handleInputChange = (e) => {
     const value = e.target.value;
     if (!/^\d{0,6}$/.test(value)) return;
-
     clearTimeout(submitTimerRef.current);
     setNumCuenta(value);
-
     if (value.length === 6) {
-      submitTimerRef.current = setTimeout(() => {
-        onRegistrarGlobal(value);
-      }, 150);
+      submitTimerRef.current = setTimeout(() => onEnqueueRegistro(value), 100);
     }
   };
 
   const handleRegistro = () => {
     clearTimeout(submitTimerRef.current);
-    onRegistrarGlobal(numCuenta);
+    onEnqueueRegistro(numCuenta);
   };
 
   const handleEnter = (e) => {
     if (e.key === 'Enter') {
       clearTimeout(submitTimerRef.current);
-      onRegistrarGlobal(numCuenta);
+      onEnqueueRegistro(numCuenta);
     }
   };
 
@@ -216,38 +229,41 @@ function RegistroAlumnos({ onRegistrarGlobal, bindReflectInput, bindResetInput }
   );
 }
 
-/* ===================== App con registro GLOBAL + overlays globales ===================== */
+/* ===================== App con registro GLOBAL + cola + overlays ===================== */
 function AppInner() {
   // Overlays globales
   const [showError, setShowError] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
   const tErr = useRef(null);
   const tOk = useRef(null);
+  const tInfo = useRef(null);
 
-  // Candado contra solicitudes simultáneas por la misma cuenta
-  const inFlightByCuenta = useRef(new Set()); // Set<numCuenta>
+  // Online/offline
+  const [offline, setOffline] = useState(!navigator.onLine);
+  useEffect(() => {
+    const on = () => setOffline(false);
+    const off = () => setOffline(true);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
 
-  // Para reflejar el escaneo en el input de RegistroAlumnos si está montado
+  // Candados y funciones de UI
   const reflectInputFnRef = useRef(null);
   const bindReflectInput = (fn) => { reflectInputFnRef.current = fn; };
   const reflectInInput = (v) => { reflectInputFnRef.current?.(v); };
 
-  // Para limpiar el input tras cada alerta
   const resetInputFnRef = useRef(null);
   const bindResetInput = (fn) => { resetInputFnRef.current = fn; };
   const resetInput = () => resetInputFnRef.current?.();
 
-  useEffect(() => {
-    return () => {
-      clearTimeout(tErr.current);
-      clearTimeout(tOk.current);
-    };
-  }, []);
+  const inFlightByCuenta = useRef(new Set());
 
   const triggerError = (message) => {
-    // Limpia input para permitir siguiente escaneo
     resetInput();
     clearTimeout(tErr.current);
     setErrorMessage(message);
@@ -255,11 +271,9 @@ function AppInner() {
     tErr.current = setTimeout(() => {
       setShowError(false);
       setErrorMessage('');
-    }, 3000);
+    }, 2200);
   };
-
   const triggerSuccess = (message) => {
-    // Limpia input para permitir siguiente escaneo
     resetInput();
     clearTimeout(tOk.current);
     setSuccessMessage(message);
@@ -267,155 +281,269 @@ function AppInner() {
     tOk.current = setTimeout(() => {
       setShowSuccess(false);
       setSuccessMessage('');
-    }, 3000);
+    }, 1200);
+  };
+  const triggerInfo = (message) => {
+    clearTimeout(tInfo.current);
+    setInfoMessage(message);
+    setShowInfo(true);
+    tInfo.current = setTimeout(() => {
+      setShowInfo(false);
+      setInfoMessage('');
+    }, 900);
   };
 
-  // === Registrador GLOBAL: idempotente y anti-duplicados ===
-  const registrarGlobal = async (numCuentaRaw) => {
-    const numCuenta = onlyDigits6(numCuentaRaw);
+  /* =========== COLA =========== */
+  const queueRef = useRef([]);         // [{ numCuenta, enqueuedAt }]
+  const processingRef = useRef(false);
+  const lastEnqueueRef = useRef({ num: null, t: 0 });
 
-    // Candado simple en cliente
+  const processQueue = async () => {
+    if (processingRef.current) return;
+    processingRef.current = true;
+    try {
+      while (queueRef.current.length > 0) {
+        if (!navigator.onLine) {
+          triggerInfo('Sin conexión. En cola…');
+          await waitUntilOnline();
+        }
+        const item = queueRef.current[0];
+
+        try {
+          const res = await registrarGlobalOnline(item.numCuenta);
+          triggerSuccess(`${res.estado} registrada para ${res.nombre}`);
+          queueRef.current.shift();
+        } catch (err) {
+          if (isRetryableFirestoreError(err)) {
+            triggerInfo(humanFirestoreError(err));
+            await sleep(600);
+            continue; // reintenta el mismo
+          }
+          triggerError(humanFirestoreError(err));
+          queueRef.current.shift(); // descarta para no bloquear
+        }
+      }
+    } finally {
+      processingRef.current = false;
+    }
+  };
+
+  const enqueueRegistro = (numCuentaRaw) => {
+    const numCuenta = onlyDigits6(numCuentaRaw);
     if (!numCuenta || numCuenta.length !== 6) {
       triggerError('El número de cuenta debe tener 6 dígitos');
       return;
     }
-    if (inFlightByCuenta.current.has(numCuenta)) return;
-    inFlightByCuenta.current.add(numCuenta);
+    // anti-rebote de mismo número en < 350ms
+    const now = Date.now();
+    if (lastEnqueueRef.current.num === numCuenta && now - lastEnqueueRef.current.t < 350) return;
+    lastEnqueueRef.current = { num: numCuenta, t: now };
+
+    queueRef.current.push({ numCuenta, enqueuedAt: now });
+    triggerInfo(`En cola (#${queueRef.current.length})`);
+    resetInput();
+    processQueue();
+  };
+
+  /* =========== LÓGICA REAL DE ESCRITURA (flexible + robusta) =========== */
+
+  // 1) Busca alumno por numCuenta como STRING y si no sale, prueba como NUMBER.
+  const buscarAlumnoFlexible = async (numCuenta) => {
+    // Primero como string
+    const qStr = query(
+      collection(db, 'alumnos'),
+      where('numCuenta', '==', numCuenta),
+      limit(1)
+    );
+    const sStr = await withRetry(() => getDocs(qStr));
+    if (!sStr.empty) return sStr.docs[0].data() || {};
+
+    // Luego como number (por si tu dataset mezcla tipos)
+    const n = Number(numCuenta);
+    if (!Number.isNaN(n)) {
+      const qNum = query(
+        collection(db, 'alumnos'),
+        where('numCuenta', '==', n),
+        limit(1)
+      );
+      const sNum = await withRetry(() => getDocs(qNum));
+      if (!sNum.empty) return sNum.docs[0].data() || {};
+    }
+
+    // Si quieres cubrir otros fields alternos, los intentas aquí (ej. 'cuenta')
+    return null;
+  };
+
+  // 2) Cuenta registros de HOY usando rango por fechaHora; si falla índice, fallback a fechaHoy string.
+  const contarRegistrosHoy = async (numCuenta, fechaHoyBonita) => {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const end = new Date();   end.setHours(23, 59, 59, 999);
 
     try {
-      const fechaHoyBonita = new Date().toLocaleDateString(); // legible local (MX)
-      const diaId = yyyymmddLocal();                           // clave estable YYYY-MM-DD
-
-      // 1) Validar alumno
-      const qAlumno = query(collection(db, 'alumnos'), where('numCuenta', '==', numCuenta));
-      const snapAlumno = await getDocs(qAlumno);
-      if (snapAlumno.empty) {
-        triggerError('No se encontró un alumno con ese número de cuenta.');
-        return;
-      }
-      const alumno = snapAlumno.docs[0].data();
-
-      // 2) Contar registros de HOY (usa tu campo existente `fechaHoy`)
+      const qRange = query(
+        collection(db, 'registros'),
+        where('numCuenta', '==', numCuenta),
+        where('fechaHora', '>=', start),
+        where('fechaHora', '<=', end),
+        orderBy('fechaHora', 'desc')
+      );
+      const snap = await withRetry(() => getDocs(qRange));
+      return snap.size;
+    } catch {
       const qHoy = query(
         collection(db, 'registros'),
         where('numCuenta', '==', numCuenta),
         where('fechaHoy', '==', fechaHoyBonita)
       );
-      const snapHoy = await getDocs(qHoy);
-      const registrosHoy = snapHoy.size;
+      const snap2 = await withRetry(() => getDocs(qHoy));
+      return snap2.size;
+    }
+  };
 
+  // 3) Último registro para cooldown (intenta ordenado; si no hay índice, fallback simple)
+  const obtenerUltimoRegistroFecha = async (numCuenta) => {
+    try {
+      const qUltimo = query(
+        collection(db, 'registros'),
+        where('numCuenta', '==', numCuenta),
+        orderBy('fechaHora', 'desc'),
+        limit(1)
+      );
+      const s = await withRetry(() => getDocs(qUltimo));
+      if (!s.empty) {
+        const fh = s.docs[0].data().fechaHora;
+        return fh?.toDate ? fh.toDate() : new Date(fh);
+      }
+      return null;
+    } catch {
+      const qSoloNum = query(collection(db, 'registros'), where('numCuenta', '==', numCuenta));
+      const s2 = await withRetry(() => getDocs(qSoloNum));
+      let last = null;
+      s2.forEach((d) => {
+        const fh = d.data().fechaHora;
+        const f = fh?.toDate ? fh.toDate() : new Date(fh);
+        if (!last || f > last) last = f;
+      });
+      return last;
+    }
+  };
+
+  // 4) Escritura idempotente con transacción (no toca UI; devuelve datos para el overlay)
+  const registrarGlobalOnline = async (numCuentaRaw) => {
+    const numCuenta = onlyDigits6(numCuentaRaw);
+    if (inFlightByCuenta.current.has(numCuenta)) {
+      const e = new Error('Procesando esta cuenta, intenta en un momento.');
+      e.code = 'in-flight';
+      throw e;
+    }
+    inFlightByCuenta.current.add(numCuenta);
+
+    try {
+      const fechaHoyBonita = new Date().toLocaleDateString();
+      const diaId = yyyymmddLocal();
+
+      // Alumno flexible
+      const alumno = await buscarAlumnoFlexible(numCuenta);
+      if (!alumno) {
+        const e = new Error('No se encontró un alumno con ese número de cuenta.');
+        e.code = 'not-found';
+        throw e;
+      }
+      const nombreAlumno = alumno.nombre ?? alumno.nombreCompleto ?? 'Alumno';
+
+      // Conteo de hoy (robusto a locales)
+      const registrosHoy = await contarRegistrosHoy(numCuenta, fechaHoyBonita);
       if (registrosHoy >= 2) {
-        triggerError('Ya cuenta con 2 registros el día de hoy.');
-        return;
+        const e = new Error('YA_HAY_DOS');
+        e.code = 'limit';
+        throw e;
       }
 
-      // 3) Enfriamiento 5 min (último registro por fechaHora)
-      let ultimoRegistroFecha = null;
-      try {
-        const qUltimo = query(
-          collection(db, 'registros'),
-          where('numCuenta', '==', numCuenta),
-          orderBy('fechaHora', 'desc'),
-          limit(1)
-        );
-        const snapUltimo = await getDocs(qUltimo);
-        if (!snapUltimo.empty) {
-          const fh = snapUltimo.docs[0].data().fechaHora;
-          ultimoRegistroFecha = fh?.toDate ? fh.toDate() : new Date(fh);
-        }
-      } catch {
-        // Fallback si no permite orderBy (sin índice)
-        const qSoloNum = query(collection(db, 'registros'), where('numCuenta', '==', numCuenta));
-        const snapSoloNum = await getDocs(qSoloNum);
-        snapSoloNum.forEach((d) => {
-          const fh = d.data().fechaHora;
-          const f = fh?.toDate ? fh.toDate() : new Date(fh);
-          if (!ultimoRegistroFecha || f > ultimoRegistroFecha) ultimoRegistroFecha = f;
-        });
-      }
-
+      // Cooldown 5 min
+      const ultimoRegistroFecha = await obtenerUltimoRegistroFecha(numCuenta);
       if (ultimoRegistroFecha) {
         const diffMin = (Date.now() - ultimoRegistroFecha.getTime()) / 60000;
         if (diffMin < 5) {
-          const faltan = Math.ceil(5 - diffMin);
-          triggerError(`Debe esperar ${faltan} minuto(s) antes de volver a registrar.`);
-          return;
+          const e = new Error(`Debe esperar ${Math.ceil(5 - diffMin)} minuto(s) antes de volver a registrar.`);
+          e.code = 'cooldown';
+          throw e;
         }
       }
 
-      // 4) Turno: 0 -> Entrada, 1 -> Salida
+      // Turno por conteo
       const turno = (registrosHoy % 2 === 0) ? 1 : 2;
       const estado = turno === 1 ? 'Entrada' : 'Salida';
 
-      // 5) Escritura idempotente con transacción + ID determinístico
-      //    - {numCuenta}-{diaId}-1  (Entrada de hoy)
-      //    - {numCuenta}-{diaId}-2  (Salida  de hoy)
+      // Transacción idempotente
       const doc1 = doc(db, 'registros', `${numCuenta}-${diaId}-1`);
       const doc2 = doc(db, 'registros', `${numCuenta}-${diaId}-2`);
 
-      await runTransaction(db, async (tx) => {
-        const s1 = await tx.get(doc1);
-        const s2 = await tx.get(doc2);
+      await withRetry(() =>
+        runTransaction(db, async (tx) => {
+          const s1 = await tx.get(doc1);
+          const s2 = await tx.get(doc2);
 
-        // Si ya hay ambos, aborta
-        if (s1.exists() && s2.exists()) {
-          throw new Error('YA_HAY_DOS');
-        }
+          if (s1.exists() && s2.exists()) throw new Error('YA_HAY_DOS');
 
-        if (turno === 1) {
-          // Entrada
-          if (!s1.exists()) {
-            tx.set(doc1, {
-              numCuenta,
-              nombre: alumno.nombre,
-              estado: 'Entrada',
-              fechaHora: serverTimestamp(),
-              fechaHoy: fechaHoyBonita,
-              diaId,
-              turno: 1,
-            });
+          if (turno === 1) {
+            if (!s1.exists()) {
+              tx.set(doc1, {
+                numCuenta,
+                nombre: nombreAlumno,
+                estado: 'Entrada',
+                fechaHora: serverTimestamp(),
+                fechaHoy: fechaHoyBonita,
+                diaId,
+                turno: 1,
+              });
+            }
+          } else {
+            if (!s2.exists()) {
+              tx.set(doc2, {
+                numCuenta,
+                nombre: nombreAlumno,
+                estado: 'Salida',
+                fechaHora: serverTimestamp(),
+                fechaHoy: fechaHoyBonita,
+                diaId,
+                turno: 2,
+              });
+            }
           }
-        } else {
-          // Salida
-          if (!s2.exists()) {
-            tx.set(doc2, {
-              numCuenta,
-              nombre: alumno.nombre,
-              estado: 'Salida',
-              fechaHora: serverTimestamp(),
-              fechaHoy: fechaHoyBonita,
-              diaId,
-              turno: 2,
-            });
-          }
-        }
-      });
+        })
+      );
 
-      // Éxito (post-transacción)
-      triggerSuccess(`${estado} registrada para ${alumno.nombre}`);
-    } catch (err) {
-      if (err?.message === 'YA_HAY_DOS') {
-        triggerError('Ya cuenta con 2 registros el día de hoy.');
-      } else {
-        console.error(err);
-        setShowSuccess(false);
-        setSuccessMessage('');
-        triggerError('Ocurrió un problema al registrar. Intente de nuevo.');
-      }
+      return { estado, nombre: nombreAlumno };
     } finally {
       inFlightByCuenta.current.delete(numCuenta);
     }
   };
 
-  // === Escaneo: REGISTRA SIEMPRE (cualquier pantalla) y refleja en input si procede ===
+  // Escaneo global → encola
   const handleScan6 = (cuenta6) => {
-    reflectInInput(cuenta6); // ver el número en pantalla si estás en "/"
-    registrarGlobal(cuenta6);
+    reflectInInput(cuenta6);
+    enqueueRegistro(cuenta6);
   };
 
   return (
     <>
-      {/* Overlays globales */}
+      {/* Banner offline */}
+      {offline && (
+        <div className="fixed top-0 inset-x-0 z-[10000] text-center py-2 bg-yellow-500 text-black font-semibold">
+          Sin conexión. Los registros se enviarán al reconectar…
+        </div>
+      )}
+
+      {/* Overlays */}
+      {showInfo && (
+        <div className="fixed inset-0 z-[9999] bg-black/40 flex items-center justify-center">
+          <div className="text-center p-8 rounded-lg bg-white shadow-lg">
+            <div className="font-extrabold mb-2" style={{ fontSize: '6vw', color: '#1f2937' }}>
+              ⏳ {infoMessage}
+            </div>
+          </div>
+        </div>
+      )}
       {showError && (
         <div className="fixed inset-0 z-[9999] bg-white/80 flex items-center justify-center animate-shake">
           <div className="text-center p-10 rounded-lg">
@@ -442,14 +570,14 @@ function AppInner() {
       )}
 
       {/* Escáner global */}
-      <GlobalKeyScanner onScan={handleScan6} reflectInInput={reflectInInput} />
+      <GlobalKeyScanner onScan={handleScan6} reflectInInput={(v) => reflectInInput(v)} />
 
       <Routes>
         <Route
           path="/"
           element={
             <RegistroAlumnos
-              onRegistrarGlobal={registrarGlobal}
+              onEnqueueRegistro={enqueueRegistro}
               bindReflectInput={bindReflectInput}
               bindResetInput={bindResetInput}
             />
